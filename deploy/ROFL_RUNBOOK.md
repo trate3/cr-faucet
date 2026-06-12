@@ -42,13 +42,13 @@ You'll be prompted for:
 
 `oasis rofl build` shells out to docker buildx + measures the resulting
 image into the attestation. It will tag and push using the `image` field
-from `compose.yaml`, which currently points at `ghcr.io/og64/mining-pool:dev`.
+from `compose.yaml`, which currently points at `ghcr.io/YOUR_ORG/mining-pool:dev`.
 
 Two options:
 
 **a) Push to ghcr.io** (your own GitHub Container Registry):
 ```bash
-echo "$GHCR_TOKEN" | docker login ghcr.io -u og64 --password-stdin
+echo "$GHCR_TOKEN" | docker login ghcr.io -u YOUR_GH_USER --password-stdin
 oasis rofl build
 ```
 
