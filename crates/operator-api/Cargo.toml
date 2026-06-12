@@ -1,0 +1,31 @@
+[package]
+name = "operator-api"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "operator-api"
+path = "src/main.rs"
+
+[dependencies]
+pool-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+chrono.workspace = true
+alloy.workspace = true
+parking_lot.workspace = true
+hashvault-client.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true

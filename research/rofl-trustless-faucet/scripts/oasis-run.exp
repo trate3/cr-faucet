@@ -1,0 +1,29 @@
+#!/usr/bin/expect -f
+# Reusable non-interactive wrapper for `oasis` commands that need to "unlock" the
+# trustless_faucet account. That account is stored with an EMPTY passphrase, but the
+# CLI's password prompt runs the terminal in raw mode and issues ESC[6n cursor-position
+# queries that block until answered — plain piping/expect stalls. This wrapper answers
+# the cursor queries, then submits the empty passphrase.
+#
+# Usage:  expect oasis-run.exp <oasis args...>
+#   e.g.  expect oasis-run.exp rofl machine show --account trustless_faucet
+#
+# Notes: feeds an empty passphrase (just <Enter>). If you re-create the account with a
+# real passphrase, change the `send "\r"` lines below to `send "yourpass\r"`.
+set timeout 120
+log_user 1
+eval spawn oasis $argv
+expect {
+  "Passphrase" {
+    # answer the (up to two) cursor-position queries, then submit empty passphrase
+    expect "6n"; send "\x1b\[24;80R"
+    expect "6n"; send "\x1b\[24;80R"
+    sleep 1; send "\r"
+    exp_continue
+  }
+  "6n"   { send "\x1b\[24;80R"; exp_continue }
+  timeout { puts "\n<<oasis-run timeout>>"; exit 2 }
+  eof {}
+}
+catch wait result
+exit [lindex $result 3]

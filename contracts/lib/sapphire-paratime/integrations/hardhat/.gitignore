@@ -1,0 +1,6 @@
+dist/
+docs/
+cache/
+artifacts/
+typechain-types/
+ignition/deployments/

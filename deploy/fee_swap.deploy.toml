@@ -1,0 +1,49 @@
+[dex]
+mode = "create"
+# Canonical Wrapped ROSE to pair MPT against (create mode). 0x0 = deploy a
+# throwaway WETH9 — local/CI ONLY. Use the real WROSE for any live pool:
+#   mainnet 0x8Bc2B030b299964eEfb5e1e0b36991352E56D2D3
+#   testnet 0xB759a0fbc1dA517aF257D5Cf039aB4D86dFB3b94
+wrapped_native = "0x8Bc2B030b299964eEfb5e1e0b36991352E56D2D3"
+
+[token]
+signer = "0x70eAB0a23e8b8Db28AC698ACD4aEE8F8E6976DA6"
+redemption_gas_subsidy = "20000000000000000"
+
+[fee_swapper]
+# Reservoir = the self-funding RentPayer (0xf53F…3b1E) — swapped fee→ROSE flows
+# straight into the rent reservoir the self_fund agent spends on machine rent.
+reservoir = "0x18c0ed1400161c7bF6a6C82b95Df99E4eCD87f06"
+# app_id = the ROFL app id (21-byte bech32-decoded rofl1…, hex). The FeeSwapper
+# gates swaps on roflEnsureAuthorizedOrigin(app_id) — the SAME app-origin
+# authority RentPayer uses — so swaps are submitted via rofl-appd and the funded
+# app account pays gas (no operator EOA to seed). deploy_contracts.sh fills this
+# from rofl.yaml. (No operator: the old onlyOperator EOA needed manual gas.)
+app_id = "0x0060d8b0034d954195d6dddf48709fba48664b1572"
+
+[seed]
+# UNBACKED bootstrap mint — the ONLY MPT not backed by mining/fee surplus, and it
+# dilutes the pro-rata redemption rate (wallet/(totalSupply+pending)). Keep it
+# EXTREMELY tiny: just enough to create the pool + a price anchor. External LPs
+# deepen liquidity afterward.
+#   1e6 base units = 0.000001 MPT (a claim on ~0.000001 XMR) — negligible.
+#   was 1e12 = 1 whole MPT = a claim on a FULL XMR (way too much).
+#
+# PRICE ANCHOR (mainnet decision — these testnet numbers are arbitrary):
+# the ratio rose_wei/mpt sets the pool's initial ROSE-per-MPT price. MPT has 12
+# decimals and 1 base unit = 1 piconero of claim, so 1 whole MPT ≈ 1 XMR when
+# fully backed. Anchor the price at the true XMR/ROSE ratio at launch:
+#       rose_wei = mpt * (XMR_price_in_ROSE) / 1e12 * 1e18
+#   e.g. if 1 XMR ≈ 3000 ROSE and mpt = 1e6:  rose_wei ≈ 1e6 * 3000/1e12 * 1e18
+#        = 3e15  (i.e. anchor ≈ 3000 ROSE/MPT, vs the 1000 ROSE/MPT below).
+#
+# ARBITRAGE: the fee-swap SELLS MPT into this pool for ROSE (self-funding), and
+# anyone can redeem MPT for XMR at the pro-rata rate. If the anchor UNDERprices
+# MPT (pool ROSE/MPT < redemption XMR-value), arbitrageurs buy cheap MPT and
+# redeem it for XMR — draining the backing — and the fee-swap realizes too little
+# ROSE per swap. If it OVERprices, external buyers overpay and miners prefer
+# selling to redeeming (fine for self-funding, bad optics). Anchor near parity,
+# keep the seed tiny, and let arbitrage + external LPs converge depth/price. The
+# on-chain swap minOut (slippage_bps) protects each swap regardless of anchor.
+mpt = "1000000"
+rose_wei = "55000000000000000"  # 0.055 ROSE bootstrap (testnet placeholder; ≈55000 ROSE/MPT)

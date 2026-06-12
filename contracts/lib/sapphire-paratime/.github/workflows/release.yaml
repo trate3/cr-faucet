@@ -1,0 +1,76 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+*'
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21.x"
+
+      - name: Build tagged release, elf, debug
+        id: build-debug-elf
+        uses: oasisprotocol/oasis-sdk/.github/actions/hash-rust@main
+        with:
+          image: ghcr.io/oasisprotocol/runtime-builder:main
+          pkg-dirs: runtime
+          binaries: sapphire-paratime
+          clean: no
+          features: debug-mock-sgx
+          setup: |
+            export OASIS_UNSAFE_SKIP_AVR_VERIFY=1 OASIS_UNSAFE_ALLOW_DEBUG_ENCLAVES=1 OASIS_UNSAFE_USE_LOCALNET_CHAINID=1
+
+      - name: Create the debug Oasis Runtime Container
+        run: |
+          go install github.com/oasisprotocol/oasis-sdk/tools/orc@latest
+          pushd runtime
+          orc init ${RUNTIME_EXECUTABLE} --output ../localnet-sapphire-paratime.orc
+          popd
+        env:
+          RUNTIME_EXECUTABLE: ${{ github.workspace }}/${{ steps.build-debug-elf.outputs.build-path }}/sapphire-paratime
+
+      - name: Build tagged release, elf
+        id: build-elf
+        uses: oasisprotocol/oasis-sdk/.github/actions/hash-rust@main
+        with:
+          image: ghcr.io/oasisprotocol/runtime-builder:main
+          pkg-dirs: runtime
+          binaries: sapphire-paratime
+          clean: no
+
+      - name: Build tagged release, sgxs
+        id: build-sgxs
+        uses: oasisprotocol/oasis-sdk/.github/actions/hash-rust@main
+        with:
+          image: ghcr.io/oasisprotocol/runtime-builder:main
+          pkg-dirs: runtime
+          binaries: sapphire-paratime.sgxs
+          clean: no
+          sgx: yes
+
+      - name: Create the Oasis Runtime Container
+        run: |
+          go install github.com/oasisprotocol/oasis-sdk/tools/orc@latest
+          pushd runtime
+          orc init ${RUNTIME_EXECUTABLE} --sgx-executable ${RUNTIME_SGXS} --output ../sapphire-paratime.orc
+          orc sgx-set-sig ../sapphire-paratime.orc
+          popd
+        env:
+          RUNTIME_EXECUTABLE: ${{ github.workspace }}/${{ steps.build-elf.outputs.build-path }}/sapphire-paratime
+          RUNTIME_SGXS: ${{ github.workspace }}/${{ steps.build-sgxs.outputs.build-path }}/sapphire-paratime.sgxs
+
+      - name: Publish the release
+        uses: ncipollo/release-action@v1
+        with:
+          draft: true
+          artifacts: sapphire-paratime.orc,localnet-sapphire-paratime.orc
+          token: ${{ secrets.GITHUB_TOKEN }}

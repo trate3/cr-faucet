@@ -1,0 +1,26 @@
+# Config for the `finalize` tool (crates/mining-pool/src/bin/finalize.rs) — the
+# last deploy step, turning the pool PERMISSIONLESS. Copy to finalize.toml.
+# Run post-boot after reading the enclave signer from the pool logs
+# ("voucher signer ready  signer_address=0x…"). Secret key via $DEPLOYER_PK.
+#
+#   DEPLOYER_PK=0x… cargo run -p mining-pool --bin finalize
+#   (or: FINALIZE_CONFIG=deploy/finalize.toml DEPLOYER_PK=0x… ./target/release/finalize)
+
+rpc_url     = "https://testnet.sapphire.oasis.io"
+token       = "0xYOUR_MINING_POOL_TOKEN"
+kms_signer  = "0xENCLAVE_KMS_SIGNER"          # from boot logs
+
+# FeeSwapper to also rotate+hand over ("" or 0x0…0 to skip).
+fee_swapper = "0xYOUR_FEE_SWAPPER"
+
+# Existing PoolGovernance, or leave "" to deploy a fresh one with governor+delay.
+governance  = ""
+# Governor for a fresh governance. For an immediate fully-permissionless result,
+# set this to the DEPLOYER and renounce = true. For ongoing timelocked control,
+# set a multisig/DAO and renounce = false.
+governor    = "0xYOUR_DEPLOYER_ADDRESS"
+delay_secs  = 172800                          # 2-day timelock (used if not renouncing)
+
+# true -> renounce now: setSigner can never be called again; only the attested
+#         enclave can mint; the deployer has zero powers.
+renounce    = true

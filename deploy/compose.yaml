@@ -1,0 +1,47 @@
+services:
+  pool:
+    # ROFL pushes the locally-built image to an OCI registry during
+    # `oasis rofl build`; this tag is what the manifest references. Bump it
+    # on each redeploy so the provider's containerd doesn't reuse a cached
+    # image. TODO(operator): point at YOUR registry, not the dev one.
+    image: ghcr.io/infinite-drip-faucet/faucet-pool:mainnet-v3
+    restart: always
+
+    # Public-facing read API + stratum. ROFL terminates TLS inside the
+    # enclave at https://p8080.<machine-id>.rofl.app and exposes stratum at
+    # p3333.<machine-id>.rofl.app:443.
+    ports:
+      - "8080:8080"
+      - "3333:3333"
+
+    # KMS socket from the ROFL host. Without this mount the rofl_kms client
+    # falls back to the on-disk signer key path (development mode), which is
+    # unsafe in production — the pool logs a warning and refuses to start
+    # the Monero wallet bootstrap. REQUIRED on mainnet.
+    volumes:
+      - /run/rofl-appd.sock:/run/rofl-appd.sock
+      - rofl-pool-data:/data
+
+    environment:
+      # MAINNET wallet daemon. Must be UNRESTRICTED RPC (the wallet pulls full
+      # block info via --trusted-daemon). The https:// scheme makes init.sh turn
+      # on wallet-rpc TLS (encrypts the wallet<->daemon channel). This only feeds
+      # monero-wallet-rpc's --daemon-address; the mining-pool binary's own
+      # difficulty quorum is the [pps].monerod_rpc_pool list in pool.toml.
+      # TODO(operator): pick a node you trust (ideally your own).
+      MONEROD_DAEMON_ADDRESS: https://node.mon3ro.com:443
+      # Drives wallet-rpc's network flag in init.sh. mainnet is also the
+      # default when unset, but set it explicitly to match
+      # [monero].network in pool.mainnet.toml — a mismatch makes wallet-rpc
+      # reject the daemon or open the wrong-network wallet.
+      MONERO_NETWORK: mainnet
+      TOR_ENABLED: "false"
+      TOR_HS_ENABLED: "true"      # publish the pool onion (mining + API over Tor, alongside clearnet)
+      ORACLE_HS_ENABLED: "true"   # the Crossroads block-hash oracle's own onion ([oracle].enabled=true)
+
+# Persistent volume backed by ROFL's disk-persistent storage. Survives
+# container restarts; wiped only when the deployment is destroyed. On
+# mainnet this holds the redemption hot wallet + Redis AOF — treat its loss
+# as loss of in-flight payout state (recoverable from chain, but disruptive).
+volumes:
+  rofl-pool-data: {}

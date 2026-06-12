@@ -1,0 +1,9 @@
+[profile.default]
+src = "."
+out = "out"
+libs = []
+remappings = ["sapphire-contracts/=/home/ubuntu/mining-pool-2/contracts/lib/sapphire-paratime/contracts/contracts/"]
+solc = "0.8.24"
+evm_version = "paris"
+fs_permissions = [{ access = "read", path = "/home/ubuntu/mining-pool-2/contracts/lib" }]
+auto_detect_remappings = false

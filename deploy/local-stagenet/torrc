@@ -1,0 +1,28 @@
+# Tor config for the local stagenet stack. Two onion v3 services:
+#   monerod_rpc  → 127.0.0.1:38089 inside the monerod container's net
+#   stratum      → 127.0.0.1:3333 inside the pool container's net
+# Tor sits on the same docker bridge as the other two, so it can reach
+# them via the service name.
+#
+# We DO NOT host a SOCKS port here — this Tor only publishes services.
+# The TEE pool runs its OWN Tor client for outbound calls.
+
+DataDirectory /var/lib/tor
+Log notice stderr
+ClientOnly 0
+ExitRelay 0
+ORPort 0
+SocksPort 0
+
+# Tor runs in host network mode (see docker-compose.yml), so it reaches
+# the other two services via host-loopback ports they bind on
+# 127.0.0.1. The HiddenServicePort first arg is the *virtual* port
+# exposed on the onion, the second is where to forward to locally.
+
+HiddenServiceDir /var/lib/tor/monerod_rpc
+HiddenServicePort 38089 127.0.0.1:38089
+
+HiddenServiceDir /var/lib/tor/stratum
+# Onion exposes the standard stratum port 3333; locally we forward to
+# stratum-stub's host-port 33333 to keep that loopback name uncluttered.
+HiddenServicePort 3333 127.0.0.1:33333

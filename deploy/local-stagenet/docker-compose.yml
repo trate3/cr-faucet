@@ -1,0 +1,149 @@
+# Local stagenet stack for end-to-end testing against the TEE pool.
+# Spin up on your laptop:
+#
+#     cd deploy/local-stagenet
+#     docker compose build stratum-stub      # ~2 min on first build
+#     docker compose up -d
+#     docker compose logs -f tor             # wait for "Bootstrapped 100%"
+#     ./show-onions.sh                       # prints both .onion hostnames
+#
+# Paste the two .onion hostnames into the TEE pool's pool.toml (see the
+# instructions at the bottom of ROFL_RUNBOOK.md) and redeploy.
+#
+# Services:
+#   monerod         stagenet daemon, restricted RPC on :38089
+#   stratum-stub    in-house stratum endpoint that pulls jobs from
+#                   monerod and acks shares. Lets the TEE pool's
+#                   upstream client log in with anything and get real
+#                   RandomX jobs xmrig can mine.
+#   tor             publishes monerod + stratum as v3 onion services.
+#                   No clearnet listen — secrets stay on the daemon side.
+
+# Tor's HiddenServicePort wants `IP:port`, not docker service names, so
+# we pin each service to a fixed IP on a custom subnet. Change the
+# subnet if it conflicts with one already in use on your host.
+services:
+  monerod:
+    # Built from the same Monero CLI tarball as the wallet-rpc the TEE
+    # ships (see ../Dockerfile). Version mismatch on regtest gives
+    # "Unexpected hard fork version vN" errors.
+    build:
+      context: .
+      dockerfile: monerod.Dockerfile
+    image: drip-monerod:dev
+    container_name: drip-stagenet-monerod
+    restart: unless-stopped
+    # tor runs in host network mode (see below) so it can reach random
+    # public Tor relays as introduction points — docker's bridge has
+    # been blocking those for us. To let host-network tor see monerod,
+    # expose the RPC port on the loopback.
+    ports:
+      - "127.0.0.1:38089:38089"
+    volumes:
+      - monerod-data:/home/monero/.bitmonero
+    # --regtest: no peers, no consensus, controlled block production via
+    # generateblocks RPC. Note that regtest uses mainnet address format
+    # (it's its own network mode, mutually exclusive with --stagenet /
+    # --testnet), so the TEE pool must be configured with
+    # `monero.network = "mainnet"` to derive matching addresses.
+    # --fixed-difficulty=1 makes share validation instant.
+    command:
+      - --regtest
+      - --fixed-difficulty=1
+      - --rpc-bind-ip=0.0.0.0
+      - --rpc-bind-port=38089
+      - --confirm-external-bind
+      - --no-igd
+      - --hide-my-port
+      - --offline
+      - --non-interactive
+      - --log-level=0
+    networks:
+      drip:
+        ipv4_address: 172.28.1.10
+
+  # One-shot helper that pre-mines a handful of blocks on the regtest
+  # chain so that get_block_template returns immediately. monerod
+  # otherwise serves "Core is busy" until it has a single block.
+  monerod-init:
+    image: curlimages/curl:latest
+    container_name: drip-stagenet-monerod-init
+    depends_on:
+      - monerod
+    restart: "no"
+    networks:
+      - drip
+    entrypoint:
+      - sh
+      - -c
+      - |
+        # Wait for monerod RPC to answer.
+        until curl -sf -m 3 http://172.28.1.10:38089/json_rpc \
+            -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":"0","method":"get_info"}' >/dev/null; do
+          sleep 1
+        done
+        # Mine 70 blocks to the Monero donation address (any valid
+        # mainnet-format address satisfies the param — regtest uses
+        # mainnet bytes). 60 is the unlock window; the extra 10 give
+        # the stratum-stub a working template right away.
+        curl -s http://172.28.1.10:38089/json_rpc \
+            -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":"0","method":"generateblocks","params":{
+                  "amount_of_blocks":70,
+                  "wallet_address":"44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A"}}'
+        echo "pre-mined 70 regtest blocks"
+
+  stratum-stub:
+    build:
+      context: ../..
+      dockerfile: deploy/local-stagenet/stratum-stub.Dockerfile
+    image: drip-stratum-stub:dev
+    container_name: drip-stagenet-stratum
+    restart: unless-stopped
+    depends_on:
+      - monerod
+    # Same reason as monerod — needs to be reachable from the
+    # host-network tor at a loopback port. 33333 (instead of the
+    # standard stratum 3333) avoids clashing with anything else.
+    ports:
+      - "127.0.0.1:33333:3333"
+    environment:
+      STUB_BIND: 0.0.0.0:3333
+      STUB_MONEROD: http://172.28.1.10:38089/json_rpc
+      RUST_LOG: info,stratum_stub=debug
+    networks:
+      drip:
+        ipv4_address: 172.28.1.11
+
+  tor:
+    build:
+      context: .
+      dockerfile: tor.Dockerfile
+    image: drip-tor:dev
+    container_name: drip-stagenet-tor
+    restart: unless-stopped
+    volumes:
+      - tor-data:/var/lib/tor
+      - ./torrc:/etc/tor/torrc:ro
+    depends_on:
+      - monerod
+      - stratum-stub
+    # Host network mode: docker's bridge inexplicably blocks outbound
+    # to public Tor relays we want as introduction points, so the HS
+    # we publish becomes unreachable. On the host stack, outbound
+    # works fine. Trade-off: tor reaches monerod and stratum-stub via
+    # 127.0.0.1 host-loopback ports (declared above) instead of the
+    # bridge subnet.
+    network_mode: host
+
+networks:
+  drip:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.1.0/24
+
+volumes:
+  monerod-data:
+  tor-data:

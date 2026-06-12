@@ -1,0 +1,387 @@
+# Example configuration; copy to pool.toml and edit.
+
+# Surface the pool's KMS Monero wallet address (= upstream stratum login) ONCE,
+# only on a fresh deploy (created=true), then redact it on every resume. Lets the
+# initial deployer grab it to set up upstream-pool monitoring. Default false; set
+# true only when you intend to capture it this deploy.
+reveal_wallet_address_once = true
+# The reveal is ENCRYPTED to this `age` X25519 recipient (`age1…`), because ROFL
+# node logs are NOT encrypted at rest (the provider can read the serial console).
+# The log then carries only ciphertext; decrypt it off-box with the age CLI:
+#     echo '<ciphertext_b64>' | base64 -d | age -d -i your-age-key.txt
+# `deploy/deploy_contracts.sh` generates a key with `age-keygen` and fills this in
+# (printing the SECRET KEY for you to save securely) if you don't pass REVEAL_PUBKEY.
+# Leave unset ONLY for local regtest, where the address is logged in the clear.
+reveal_wallet_pubkey = "age1qqqqplaceholderqqqqreplaceqqqqwithqqqqyourqqqqrecipientqq0xxxxx"
+
+[stratum]
+bind = "0.0.0.0:3333"
+min_share_difficulty = 10000
+target_seconds_per_share = 20
+max_submits_per_second = 5
+# Adaptive RandomX verification (set at startup; no live admin).
+# - verification_warmup: how many *consecutive* successful verifications a
+#   miner must accrue before we start sampling. During warmup every share is
+#   verified. Any rejection resets the counter back to 0.
+# - verification_sample_rate: probability (0.0..=1.0) that a post-warmup share
+#   is still verified as a spot check. 0.10 = ~1-in-10 catch rate.
+verification_warmup = 5
+verification_sample_rate = 0.10
+# Grace window (seconds) for "late" share submissions on a same-height
+# old job. Shares for an old job past this window are rejected as stale;
+# shares for an old job at a LOWER block height are rejected immediately
+# regardless of this window.
+share_grace_secs = 20   # credit shares from jobs superseded up to 20s ago (busy upstreams like HashVault roll fast)
+
+# Per-miner variable-difficulty tuning. Optional — omit for the defaults shown.
+# Difficulty only changes at job boundaries (the diff advertised with each job).
+[stratum.vardiff]
+# cryptonote-pool-style controller. The rate is the AVERAGE of the last
+# `sample_size` share intervals found at the CURRENT difficulty (the window is
+# cleared on every change, so times are never mixed across difficulties). Bigger
+# = steadier, slower to react.
+sample_size = 16
+# Dead-band: while the average share time is within ±variance_percent of target,
+# the diff is LEFT UNCHANGED. This is the main steady-state-jitter control — the
+# diff stops moving once it's good enough. 30 = no change while avg ∈ [0.7,1.3]×.
+variance_percent = 30
+# Hard cap on a single UPWARD change: 2.0 = at most +100% (double) per change.
+max_gain_factor = 2.0
+# Hard cap on a single DOWNWARD change: 0.5 = at most -50% (halve) per change.
+# (Idle is handled here too: a long gap with no share counts as a very long share
+# time, so a stalled miner's diff comes down.)
+max_drop_factor = 0.7    # cap a single DOWN change to -30% (smooth); idle also decays via this path
+
+[upstream]
+# HashVault — lower payout threshold than most pools, suits a tiny operator.
+# `stratum+ssl://...:443` means TLS-wrapped stratum, which is what HashVault
+# exposes on port 443. The proxy auto-detects the scheme; use
+# `stratum+tcp://...:3333` for the plain endpoint if you ever need it.
+# PRODUCTION (mainnet): a real Monero stratum pool that pays out to the
+# operator's wallet. `stratum+ssl` is TLS-wrapped stratum on port 443
+# (HashVault's TLS endpoint).
+#   url = "stratum+ssl://pool.hashvault.pro:443"
+#
+# LOCAL STAGENET (via deploy/local-stagenet/): our in-house stub stratum
+# served as an onion v3 hidden service. Set `[tor].enabled = true` so the
+# upstream client routes through Tor.
+#   url = "stratum+tcp://v4nqsli6xw7ppsxrdj3tzkxnwhfh5hcsjhp4esrcdcuq4t35dx3dvuad.onion:3333"
+#
+# TESTNET-AGAINST-HASHVAULT: real HashVault mainnet upstream so we exercise a
+# ROLLING job stream (the local stub only ever serves one static job, which is
+# why pushed-job refreshes weren't visible). Reached over Tor — verified that
+# HashVault accepts stratum-over-Tor. The redemption wallet stays on stagenet
+# ([monero].network); only the LOGIN address is derived on mainnet (see
+# login_address_network below), since HashVault rejects stagenet addresses.
+url = "stratum+ssl://pool.hashvault.pro:443"
+
+# Stratum `login` username. On HashVault (and Monero pools generally) this
+# is the pool operator's PRIMARY Monero wallet address — that's the address
+# HashVault credits when our combined hashrate finds a block. Keep the
+# corresponding spend key sealed in the TEE alongside the redemption
+# hot-wallet keys.
+user = "4YOUR_MONERO_PRIMARY_WALLET_ADDRESS_HERE_BASE58_95_CHARS"
+
+# Derive the stratum LOGIN address on this network instead of [monero].network.
+# Same KMS keys, mainnet representation — so HashVault (mainnet-only) accepts
+# the login while the redemption wallet keeps running on stagenet. Unset/empty
+# on a true mainnet deploy (login == wallet network there).
+login_address_network = "mainnet"
+
+# Egress DIRECTLY to HashVault (stratum + API), bypassing Tor even though
+# [tor].enabled=true (still needed for the stagenet monerod onion). HashVault is
+# clearnet; the Tor RTT (~2s) was making most upstream submits arrive stale, so
+# direct egress sharply raises the upstream accept rate. TLS stays on, unverified
+# (no tls_pin_sha256) — matching xmrig's default, which is acceptable here.
+direct = true
+
+# Worker tag. HashVault treats this as a free-form label that surfaces in
+# their dashboard / API; not load-bearing.
+password = "tiny-pool"
+keepalive_secs = 60
+
+# Optional SOCKS5h proxy for the outbound connection. Useful inside a TEE
+# whose egress is firewalled, or when the host can't resolve mining-pool
+# DNS. Leave commented out for direct egress.
+# socks5h_proxy = "socks5h://127.0.0.1:9050"
+
+# By default `stratum+ssl://` encrypts the wire but does NOT validate the
+# pool's TLS cert — the Monero pool ecosystem (HashVault included) serves
+# self-signed certs that no public CA covers. This matches xmrig's default.
+# A determined active MITM could steal submitted shares; if that's in your
+# threat model, fetch HashVault's leaf cert fingerprint yourself and set
+# `tls_pin_sha256` below. Fetch directly (not via Tor/VPN) — anything in
+# the path could be MITM'ing you:
+#   echo | openssl s_client -connect pool.hashvault.pro:443 \
+#                           -servername pool.hashvault.pro 2>/dev/null \
+#     | openssl x509 -outform DER \
+#     | sha256sum
+# tls_pin_sha256 = "<paste 64-char hex you fetched>"
+
+[pps]
+pool_fee = 0.01
+# Fee policy. "fixed": always charge pool_fee. "adaptive": scale the fee with
+# rent pressure — the reservoir's ROSE balance vs [fee_swap].rent_floor_wei
+# (critical) and rent_target_wei (healthy) — between fee_min and fee_max, so the
+# pool takes a bigger cut exactly when it needs funds to stay alive, and a
+# smaller cut (better miner payouts) when flush. Needs [fee_swap].fee_swapper_address.
+fee_mode = "fixed"
+fee_min = 0.01     # adaptive floor (reservoir healthy)
+fee_max = 0.10     # adaptive ceiling (rent critically low)
+risk_buffer = 0.05
+upstream_fee = 0.006
+operational_cost_atomic_xmr_per_second = 10000   # ≈ a few cents/hour at XMR=$150
+refresh_secs = 60
+
+# Block reward is hardcoded at the Monero tail-emission constant
+# (0.6 XMR = 600_000_000_000 atomic). We don't ask any remote node for it,
+# so a malicious node can't inflate miner credits by lying about the reward.
+#
+# Network difficulty IS pulled from monerod RPCs. To avoid trusting a single
+# remote node, list a pool of public-node URLs below. Each refresh picks
+# `sample_size` of them at random in parallel and requires `quorum_size`
+# to agree on (height, difficulty) before committing. A larger pool tolerates
+# more node outages. A larger quorum is more robust against a few malicious
+# nodes at the cost of more false-negative refreshes.
+#
+# Tip: stagger your pool across operators/jurisdictions so a single outage
+# can't take all of them down. Public lists: monero.fail/nodes,
+# moneroworld.com, plus your own hosted ones if available.
+#
+# These defaults are STAGENET so the example config can run end-to-end
+# against the same network as the bundled monero-wallet-rpc setup
+# (`MONEROD_DAEMON_ADDRESS=stagenet.melo.tools:38081`). Swap to the
+# mainnet URLs above for production.
+# PRODUCTION (mainnet): a diverse pool of public node operators.
+# Replace with TLS-secured nodes you trust; rotate periodically.
+#   monerod_rpc_pool = [
+#     "https://node.community.rino.io:18081/json_rpc",
+#     "https://node.monerodevs.org:18089/json_rpc",
+#   ]
+#
+# STAGENET (remote node, no local sync): point at a public stagenet
+# daemon. Single-node is fine for testing; add more for resilience.
+monerod_rpc_pool = [
+  "http://node.monerodevs.org:38089/json_rpc",
+]
+quorum_size = 1
+sample_size = 1
+
+# Fallback single endpoint — used only if `monerod_rpc_pool` is empty.
+# Most useful for local-development setups against `monerod --regtest`.
+monerod_rpc = ""
+
+[redis]
+# Recommended TEE setting: redis-server --appendonly yes --appendfsync everysec
+# Loss budget on hard crash: <=1 second of share credits.
+url = "redis://127.0.0.1:6379"
+
+[l2]
+# Sapphire testnet defaults. To run on a different chain (mainnet, a
+# private rollup, Base Sepolia, …) override these three fields. The
+# binary only does *reads* on the L2 (totalSupply, claimed, Redemption
+# logs) and never sends transactions itself — so the chain's confidential
+# tx envelope is irrelevant to us; vanilla HTTP/WS endpoints work.
+rpc_ws = "wss://testnet.sapphire.oasis.io/ws"
+rpc_http = "https://testnet.sapphire.oasis.io"
+chain_id = 23295
+mining_pool_token_address = "0xedf11632fa1F1C24874Cab281f7900B4fEec6170"
+# Earliest block to scan for `Redemption` events. Pin to the contract
+# deploy block so first-boot doesn't try to scan all of Sapphire history
+# (at chunk_size=100 that's millions of RPC calls). Update if you
+# redeploy the contract.
+events_from_block = 1  # id-poller: first redemption id to scan (1 = include all from new contract)
+# Only consulted when ROFL's appd KMS socket is absent (i.e. local dev).
+# Inside ROFL we derive the signer key from KMS at startup — see
+# `mining-pool/src/rofl_kms.rs`.
+signer_key_path = "/run/secrets/pool_signer.key"
+
+[monero]
+wallet_rpc = "http://127.0.0.1:18083/json_rpc"
+wallet_rpc_user = ""
+wallet_rpc_pass = ""
+min_reserve_ratio = 1.05
+per_tx_cap_atomic = 1000000000000     # 1 XMR
+per_day_cap_atomic = 10000000000000   # 10 XMR
+# Cap on the wallet balance used for the pro-rata redemption formula. We
+# cap the effective balance at `(totalSupply + pending) × (1 + cap/10_000)`
+# so a temporary surplus in the wallet doesn't get fully distributed to
+# whoever happens to redeem first — anything above the cap stays in the
+# wallet as operator buffer. Default 0 = strict 1:1: redeemers can never
+# get more atomic XMR than the tokens they burn represent. Raise to share
+# some surplus with redeemers (e.g. 1000 = 10%, 500 = 5%).
+max_payout_premium_bp = 0             # strict 1:1
+
+# Monero network — must match what the configured wallet-rpc + monerod
+# serve. Options: "mainnet", "testnet", "stagenet". Defaults to
+# "testnet" so the example config is safe to run with stagenet daemons.
+# PRODUCTION: "mainnet" against a real mainnet daemon.
+# LOCAL-DEVNET (deploy/local-stagenet/): also "mainnet" — monerod's
+# `--regtest` mode uses mainnet address bytes despite being offline.
+# Must match the network the configured monerod actually serves.
+network = "stagenet"
+# Wallet file name under wallet-rpc's --wallet-dir. Lives on the ROFL
+# `disk-persistent` mount so the scan cache survives restarts; we only
+# call generate_from_keys when it doesn't exist yet.
+wallet_filename = "pool"
+# Wallet password. Empty is fine inside ROFL since the persistent mount
+# is already KMS-sealed; only set this when running outside a TEE.
+wallet_password = ""
+
+[operator_api]
+# Public read-only HTTP API. No authentication: every endpoint is meant
+# for anyone (miners checking their balance, dashboards graphing pool
+# stats). There is no operator, so there are no admin endpoints.
+bind = "0.0.0.0:8080"
+
+[tor]
+# Route outbound HTTP + stratum through the bundled tor SOCKS5h proxy.
+# Useful only when you're pointing the pool at `.onion` endpoints
+# (private stagenet daemon + stratum hosted on your laptop, for
+# instance). Mainnet deployments hitting public clearnet pools should
+# leave this off — Tor adds latency and the public stratum/RPC don't
+# need anonymity.
+# PRODUCTION: false. LOCAL-STAGENET: true.
+enabled = true
+socks5h = "socks5h://127.0.0.1:9050"
+
+[randomx]
+# "light" — cache-only RandomX (~256 MB RAM, ~30-150 H/s per core).
+#           Recommended on a small (≤2 GB) VPS. Combined with the
+#           adaptive verification policy this is plenty for a tiny pool.
+# "full"  — dataset RandomX (~2 GB RAM, ~6× faster per hash). Use on
+#           machines that can spare the headroom comfortably.
+mode = "light"
+
+[hashvault]
+# When the TEE pool's upstream is HashVault mainnet, set enabled=true
+# to (a) pin the per-wallet payout threshold to HashVault's 0.001 XMR
+# minimum on first boot, and (b) periodically pull pool stats from the
+# HashVault stats endpoint and expose them on /upstream_stats.
+# The pool's KMS-derived Monero address is sent as part of these
+# requests but NEVER echoed on /upstream_stats — anyone who knows the
+# address can change the threshold via the HashVault API.
+# Enabled now that the upstream is real HashVault: the pool pins the per-wallet
+# payout threshold to the 0.001 XMR minimum (ensure_min_threshold, idempotent)
+# on every launch and pulls stats onto /upstream_stats. Reaches api.hashvault.pro
+# over Tor (GET is quick; the POST can need a slow circuit — falls back to the
+# stats poller's retries if the one-shot times out).
+enabled = true
+base_url = "https://api.hashvault.pro"
+refresh_secs = 60
+set_threshold = true
+
+[single_active]
+# Guard against running two instances at once (they share the same KMS wallet
+# and would double-pay XMR). NEEDS NO PER-INSTANCE CONFIG: inside a ROFL TEE the
+# pool reads its own app id from appd and counts the app's live on-chain
+# registrations (rofl.AppInstances) — read-only, no gas. Our own instance is
+# always in that set once running, so a count of 1 means we're alone; ≥2 means
+# another instance is live and we wait until it's gone. Auto-skipped outside a
+# TEE (no appd socket), so this section is a no-op for local/dev.
+enabled = true
+# Startup wait before counting, so our own (already-submitted) registration is
+# certainly on-chain first. One epoch is ample.
+settle_secs = 90
+# Count DISTINCT nodes, not raw registrations. A redeploy leaves a stale
+# registration on the SAME node until it expires (up to max_expiration epochs —
+# ~hours on Sapphire), which strict counting treats as a peer and blocks on.
+# node_aware ignores same-node ghosts (a real peer runs on a different node) so
+# redeploys come back immediately. ON for testnet (fast iteration). Trade-off:
+# two deliberately co-located instances on one node would both run — leave this
+# OFF on mainnet for the strictest double-pay safety.
+node_aware = true
+
+[endpoint_registry]
+# Publish the pool's miner-facing endpoints (onion + stratum TLS fingerprint) to
+# the on-chain PoolEndpointRegistry so miners discover/verify them without
+# trusting DNS, a README, or the rofl.app proxy. Authenticated by ROFL app-origin
+# (the app account pays gas). One-shot at boot, and skipped entirely when the
+# stored values already match what the enclave derives — so it only transacts
+# when the entry is missing or stale.
+enabled = true
+address = "0x8C70e21eC63E6b17acfae410e77F7dfdB4e4F9d6"
+
+[fee_swap]
+# Automatically convert the pool's accrued fee margin (the [pps].pool_fee slice
+# that piles up as unencumbered wallet surplus) into native ROSE for rent. The
+# enclave mints fee-MPT against the surplus (a self-signed voucher — same
+# mechanism miners use, so it stays reserve-safe) and sells it on the MPT/WROSE
+# Uniswap pool through the FeeSwapper contract, which forwards the ROSE to the
+# rent reservoir. No XMR leaves the wallet; the fee-MPT is backed by the surplus.
+# FAST-GATE: disabled for the changed-bits smoke test (the fee→ROSE loop is
+# already validated on testnet — see fee-swap-and-trustless-roadmap). The full
+# FeeSwapper deployed + reservoir=RentPayer + operator=KMS, so the loop is live.
+enabled = true
+# FeeSwapper contract address — filled in by the deploy (deploy/deploy_contracts.sh
+# deploys it and rewrites this field). The enclave signer must be its operator.
+fee_swapper_address = "0x555FE1Fc70A734042aD031DD5cE5fBe544464a02"
+# "Necessary" gate: only swap when the reservoir's native balance is below this
+# many wei. Keeps swaps rare — we top up rent, we don't hoard ROSE. 5 ROSE here.
+rent_floor_wei = "5000000000000000000"   # 5 ROSE (also the adaptive-fee "critical" anchor)
+# Adaptive-fee "healthy" anchor: at/above this reservoir balance the fee is fee_min.
+rent_target_wei = "50000000000000000000"  # 50 ROSE
+# Skip dust: require at least this much realizable surplus (atomic XMR).
+min_swap_atomic = 100000000      # 0.0001 XMR
+# Cap per sweep (atomic XMR) to bound price impact on the pool.
+max_swap_atomic = 5000000000     # 0.005 XMR
+# Slippage tolerance (bps): minOut = quote × (1 - bps/10000). The on-chain swap
+# reverts below this, so a thin/manipulated book is a no-op, never a loss.
+slippage_bps = 200               # 2%
+# Base cadence between checks, plus a uniform random extra delay in [0, jitter]
+# so the swap isn't front-runnable on a fixed schedule.
+# TESTNET-FAST: tick every ~20-30s so tests don't wait 10-40 min. Mainnet
+# (pool.mainnet.toml) keeps the slow, front-run-resistant 600s + 1800s jitter.
+check_interval_secs = 20
+jitter_secs = 10
+
+[self_fund]
+# Autonomous ROFL rent self-top-up: spends the RentPayer reservoir on rent ONLY
+# when the machine is near expiry, in small fixed increments (rent is
+# non-refundable, so never prepay more than you must). The reservoir is fed by
+# the fee_swap mint→swap loop; this agent spends it.
+enabled = true
+rent_payer_address = "0x25C34F6327E8ad7c034d83eb241979e888743235"
+provider_hex = "005599c1f7807c8baa2eec8ddadc395d9b9b460e21"
+instance_id_hex = "0000000000000624"
+# Longest term to prepay (1=hour,2=month,3=year). The agent buys the
+# CHEAPEST-per-unit-time term it can afford up to this cap (flush reserve → a
+# cheap month, topped up rarely), and falls back to 1 hour when it can only
+# scrape that. The cap bounds non-refundable prepaid rent.
+max_topup_term = 2
+# Top up only when runway drops below this — keep it < the term you buy AND <
+# the initial deploy term, or the agent tops up a freshly-paid machine on boot.
+safety_window_secs = 1200
+min_topup_interval_secs = 60     # TESTNET-FAST (mainnet: 600)
+# Adaptive cadence: poll ≈ runway/4, clamped to [min, max]. Frequent when
+# scraping for the next hour, rare when a month is paid.
+# TESTNET-FAST poll cadence so top-ups follow swaps quickly (mainnet: 120/3600).
+min_check_interval_secs = 20
+max_check_interval_secs = 120
+reserve_floor_wei = "0"
+# Leave OFF in production. (Set true once on testnet to validate the mechanism;
+# it forces a top-up on boot regardless of runway.)
+force_first_topup = true
+
+[oracle]
+# Crossroads EVM block-hash oracle, absorbed into this pool ROFL (shares the
+# machine + its self-funded rent). A SIGN-ONLY HTTP service: it returns
+# signer-signed block-hash reports that the REQUESTER relays on-chain to
+# EvmBlockHashOracle.submitBlockHash — the oracle itself never posts on chain
+# (its one on-chain action is a boot-time signer registration via app-origin).
+# Served behind its OWN dedicated onion (deploy/torrc + ORACLE_HS_ENABLED in
+# init.sh) so per-circuit-id rate limiting + onion PoW apply only to it.
+enabled = true
+# Deployed BlockHashSignerRegistry (the pool's signer authority; set by deploy).
+# Per-chain oracles are named per-request + read from chain, not configured here.
+registry_address = "0x36835097555cE7aA110c0d29cBf89eBBa619eBAa"
+bind = "127.0.0.1:8081"
+hidden_service_dir = "/data/tor/oracle_hs"
+# KMS key-derivation seed for the secp256k1 report signer. FREEZE at mainnet —
+# changing it rotates the on-chain signer.
+signer_kms_label = "crossroads-evm-block-hash-signer-v1"
+max_source_rpcs = 8             # cap on RPC-committee fan-out
+rate_limit_per_sec = 3          # per-Tor-circuit request rate
+global_rate_limit_per_sec = 30  # aggregate ceiling across all circuits
+report_ttl_secs = 1800
+allow_signer_rotation = false

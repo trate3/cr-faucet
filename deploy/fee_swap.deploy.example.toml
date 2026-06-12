@@ -1,0 +1,39 @@
+# Deploy config for contracts/script/DeployFeeSwap.s.sol.
+# Copy to fee_swap.deploy.toml and edit. Addresses are public (safe to commit);
+# the deployer PRIVATE KEY is NOT here — pass it as the DEPLOYER_PK env var.
+# Amounts are decimal STRINGS (TOML integers are i64 and wei overflows them).
+#
+# Deploy (auto-verifies our contracts on Sourcify):
+#   DEPLOYER_PK=0x… DEPLOY_CONFIG=../deploy/fee_swap.deploy.toml \
+#   forge script script/DeployFeeSwap.s.sol --rpc-url <url> \
+#       --legacy --broadcast --verify --verifier sourcify --chain 23295
+#
+# Sourcify scope: --verify covers OUR contracts (MiningPoolToken, FeeSwapper —
+# and PoolGovernance when deployed). The DEX in mode="create" is the canonical
+# UniswapV2 Factory/Router02/WETH9, deployed from upstream bytecode (not our
+# source), so forge can't source-verify it — it's recognizable as the official
+# bytecode. In mode="supply" the DEX is an existing, already-verified deployment.
+
+[dex]
+# "create": deploy our own canonical UniswapV2 (Factory/Router02/WETH9) — great
+#           for testnet. "supply": use an existing router (mainnet) via `router`.
+mode = "create"
+# router = "0xEXISTING_UNISWAPV2_ROUTER"     # supply mode only
+
+[token]
+# authorizedSigner. Set to the DEPLOYER for the initial deploy (so it can sign
+# the seed voucher); rotate to the enclave KMS address post-boot via
+# token.setSigner(<kms>). MUST equal the deployer if you seed liquidity below.
+signer = "0xYOUR_DEPLOYER_ADDRESS"
+redemption_gas_subsidy = "20000000000000000"   # 0.02 ROSE (wei)
+
+[fee_swapper]
+reservoir = "0xRENT_RESERVOIR_ADDRESS"         # receives swapped ROSE (e.g. RentPayer)
+# FeeSwapper operator (enclave EOA allowed to trigger swaps). Set to the deployer
+# initially; rotate to KMS post-boot via feeSwapper.setOperator(<kms>).
+operator = "0xYOUR_DEPLOYER_ADDRESS"
+
+[seed]
+# Initial MPT/ROSE liquidity (set both to "0" to skip). MPT is 12-decimals.
+mpt = "1000000000000"                           # 1.0 MPT
+rose_wei = "1000000000000000000"                # 1 ROSE

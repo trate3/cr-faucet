@@ -1,0 +1,26 @@
+target/
+**/*.rs.bk
+Cargo.lock.bak
+.env
+.env.*
+!.env.example
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+node_modules/
+*.log
+deploy/secrets/
+# Per-deploy record written by redeploy.sh — can contain the Monero wallet
+# address (the mainnet payout address must never be committed).
+deploy/DEPLOY_LOG.md
+*.orc
+# Forge artifacts + python caches anywhere (e.g. research/ sub-projects)
+**/out/
+**/cache/
+**/broadcast/
+__pycache__/
+*.pyc
+deploy/fee_swap.config
+contracts/broadcast/
+contracts/cache/
+deploy/finalize.toml

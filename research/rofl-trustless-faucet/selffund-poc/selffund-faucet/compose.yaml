@@ -1,0 +1,21 @@
+services:
+  selffunder:
+    image: "ghcr.io/trate3/selffund-faucet:v3"
+    platform: linux/amd64
+    restart: unless-stopped
+    volumes:
+      - /run/rofl-appd.sock:/run/rofl-appd.sock   # appd REST API (the enclave's tx/query path)
+    environment:
+      # Set post-deploy via `oasis rofl secret set` (see RESUME.md):
+      - RENTPAYER=${RENTPAYER}                     # RentPayer contract address (0x..)
+      - INSTANCE_ID_HEX=${INSTANCE_ID_HEX}         # our 8-byte instance id (hex)
+      # PROVIDER_HEX is the marketplace provider you rent from (per-deployment,
+      # NOT network-specific logic): set it to your mainnet provider for mainnet.
+      - PROVIDER_HEX=${PROVIDER_HEX:-005599c1f7807c8baa2eec8ddadc395d9b9b460e21}
+      # No RPC endpoint: balance is read via the local appd socket (network-agnostic).
+      # Per-term rent prices are read LIVE from instance.payment.terms — not set here.
+      - RESERVE_FLOOR_WEI=${RESERVE_FLOOR_WEI:-0}
+      - SAFETY_WINDOW_SEC=${SAFETY_WINDOW_SEC:-3600}
+      - MIN_TOPUP_INTERVAL_SEC=${MIN_TOPUP_INTERVAL_SEC:-600}
+      - CHECK_INTERVAL_SEC=${CHECK_INTERVAL_SEC:-120}
+      - FORCE_FIRST_TOPUP=${FORCE_FIRST_TOPUP:-0}

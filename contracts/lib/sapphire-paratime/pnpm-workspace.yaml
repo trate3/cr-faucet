@@ -1,0 +1,15 @@
+packages:
+  - clients/js
+  - integrations/viem-v2
+  - integrations/wagmi-v2
+  - integrations/ethers-v6
+  - integrations/hardhat
+  - contracts/
+  - examples/hardhat
+  - examples/hardhat-boilerplate
+  - examples/hardhat-boilerplate/frontend
+  - examples/hardhat-viem
+  - examples/onchain-signer
+  - examples/wagmi-v2
+  - examples/wagmi-v1
+  - examples/encrypted-events

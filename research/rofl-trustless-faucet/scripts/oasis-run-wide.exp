@@ -1,0 +1,24 @@
+#!/usr/bin/expect -f
+# Same as oasis-run.exp but forces a WIDE pty (220 cols) and reports a wide cursor
+# position to ESC[6n queries. The oasis CLI's OCI push progress bar panics
+# ("strings: negative Repeat count") when the long rofl.sh/<uuid> label exceeds the
+# detected terminal width, so we make the terminal wide. Empty passphrase as before.
+set stty_init "rows 50 cols 220"
+set timeout 600
+log_user 1
+eval spawn oasis $argv
+stty rows 50 cols 220 < $spawn_out(slave,name)
+expect {
+  "Passphrase" {
+    expect "6n"; send "\x1b\[50;220R"
+    expect "6n"; send "\x1b\[50;220R"
+    sleep 1; send "\r"
+    exp_continue
+  }
+  -re "Sign this transaction.*y/N" { send "y\r"; exp_continue }
+  "6n"   { send "\x1b\[50;220R"; exp_continue }
+  timeout { puts "\n<<oasis-run-wide timeout>>"; exit 2 }
+  eof {}
+}
+catch wait result
+exit [lindex $result 3]

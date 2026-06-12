@@ -1,0 +1,18 @@
+# Don't ship host build artifacts into the docker build context.
+# Without this, the container build pulls in 10+ GB of host `target/`,
+# eating sandbox disk and bloating the final image.
+target/
+**/target/
+
+# Local dev/test artifacts the production image never needs.
+deploy/secrets/
+deploy/mining-pool.testnet.orc
+deploy/local-stagenet/
+deploy/local-tor-client.torrc
+
+# IDE noise.
+.idea/
+.vscode/
+
+# Git history isn't needed inside the container.
+.git/

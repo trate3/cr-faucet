@@ -1,0 +1,27 @@
+version: 2
+updates:
+
+  # Manage Github Actions versions.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: "ci:"
+
+# Never uncomment. Dependabot for Cargo isn't great.
+#  # Manage Rust package versions.
+#  - package-ecosystem: cargo
+#    directory: /
+#    schedule:
+#      interval: daily
+#    commit-message:
+#      prefix: "cargo:"
+
+# Uncomment when https://github.com/dependabot/dependabot-core/issues/1736 is resolved.
+# - package-ecosystem: npm
+#   directory: clients/js
+#   schedule:
+#     interval: daily
+#   commit-message:
+#     prefix: "clients/js:"

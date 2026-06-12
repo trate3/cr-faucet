@@ -1,0 +1,54 @@
+[package]
+name = "mining-pool"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mining-pool"
+path = "src/main.rs"
+
+[features]
+# Real RandomX (light mode) verifier. Same trade-off as in the stratum-proxy
+# crate: production builds want it, CI without C++ deps can drop it.
+default = ["real"]
+real = ["stratum-proxy/real"]
+
+[dependencies]
+pool-core.workspace = true
+accountant.workspace = true
+pps-rate.workspace = true
+voucher-signer.workspace = true
+operator-api.workspace = true
+redemption-watcher.workspace = true
+crossroads-oracle.workspace = true
+stratum-proxy.workspace = true
+randomx-verify.workspace = true
+hashvault-client.workspace = true
+
+tokio.workspace = true
+axum.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+alloy.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+hex.workspace = true
+monero.workspace = true
+curve25519-dalek.workspace = true
+age.workspace = true
+parking_lot.workspace = true
+chrono.workspace = true
+tokio-rustls.workspace = true
+rcgen.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+data-encoding.workspace = true
+ciborium.workspace = true
+reqwest.workspace = true
+futures.workspace = true

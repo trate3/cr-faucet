@@ -1,0 +1,45 @@
+# Tor config baked into the container image. Used only when
+# `[tor].enabled = true` in pool.toml — when off, mining-pool builds
+# direct reqwest clients and never sends traffic through this proxy.
+#
+# We DO start tor either way because (a) starting it lazily would
+# require restarting the supervisor mid-flight when an operator flips
+# the flag, and (b) idle tor uses ~20 MB and ~0% CPU.
+
+SocksPort 127.0.0.1:9050 IsolateDestPort IsolateDestAddr
+ControlPort 0
+AvoidDiskWrites 1
+DataDirectory /data/tor
+
+# Notice-level: enough to see bootstrap progress + HS-related events
+# without the noise of per-circuit info logs.
+Log notice stderr
+
+# Tor refuses to start in client-only mode if we also host a hidden
+# service, so we leave that flag off and instead disable the relay/exit
+# behavior explicitly below.
+ExitRelay 0
+ORPort 0
+
+# Hidden service for the public pool API + downstream stratum. Tor reads
+# the key files from this dir; `mining-pool tor-hs-init` writes them
+# from the KMS-derived ed25519 seed before tor starts. Disabled at the
+# init-script level when TOR_HS_ENABLED=false (see deploy/init.sh).
+HiddenServiceDir /data/tor/hidden_service
+HiddenServicePort 80   127.0.0.1:8080
+HiddenServicePort 3333 127.0.0.1:3333
+
+# Crossroads EVM block-hash oracle — its OWN onion, so per-circuit-id export and
+# the onion PoW defense apply ONLY here (the pool's stratum/api onion above is
+# untouched). Keys: `mining-pool tor-hs-init <dir> crossroads-oracle-onion-v1`.
+#   - ExportCircuitID haproxy: prepends a PROXY-v1 header whose source encodes a
+#     unique-per-circuit id, so the oracle rate-limits per circuit (not per IP).
+#   - PoWDefensesEnabled: per-connection proof-of-work under load, so spinning up
+#     many circuits to dodge the per-circuit cap costs CPU each time. Needs tor
+#     >= 0.4.8 — the image installs tor from the Tor Project repo (see Dockerfile),
+#     not Debian's 0.4.7.
+# Stripped by init.sh unless ORACLE_HS_ENABLED=true.
+HiddenServiceDir /data/tor/oracle_hs
+HiddenServicePort 80 127.0.0.1:8081
+HiddenServiceExportCircuitID haproxy
+HiddenServicePoWDefensesEnabled 1

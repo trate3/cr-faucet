@@ -1,0 +1,151 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - clients/js/v[0-9]+.[0-9]+.[0-9]+*
+      - clients/py/v[0-9]+.[0-9]+.[0-9]+*
+      - contracts/v[0-9]+.[0-9]+.[0-9]+*
+      - integrations/ethers-v6/v[0-9]+.[0-9]+.[0-9]+*
+      - integrations/foundry/v[0-9]+.[0-9]+.[0-9]+*
+      - integrations/hardhat/v[0-9]+.[0-9]+.[0-9]+*
+      - integrations/viem-v2/v[0-9]+.[0-9]+.[0-9]+*
+      - integrations/wagmi-v2/v[0-9]+.[0-9]+.[0-9]+*
+
+# See: https://docs.npmjs.com/generating-provenance-statements
+# See: https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds
+permissions:
+  id-token: write # to enable use of OIDC for npm provenance
+  contents: read
+
+jobs:
+  publish-npmjs:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref_name, 'clients/js/v') || startsWith(github.ref_name, 'contracts/v') || startsWith(github.ref_name, 'integrations/ethers-v6/v') || startsWith(github.ref_name, 'integrations/hardhat/v') || startsWith(github.ref_name, 'integrations/viem-v2/v') || startsWith(github.ref_name, 'integrations/wagmi-v2/v')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        id: pnpm-install
+        with:
+          version: 10
+          run_install: false
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build JS client
+        working-directory: clients/js
+        run: pnpm build
+      - name: Build ethers-v6 integration
+        working-directory: integrations/ethers-v6
+        run: pnpm build
+      - name: Build hardhat integration
+        working-directory: integrations/hardhat
+        run: pnpm build
+      - name: Build Viem integration
+        working-directory: integrations/viem-v2
+        run: pnpm build
+      - name: Build Wagmi integration
+        working-directory: integrations/wagmi-v2
+        run: pnpm build
+      - name: Extract package from tag
+        id: extract-tag
+        env:
+          # There's no support for escaping this for use in a shell command.
+          # GitHub's recommendation is to pass it through the environment.
+          # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "NPM_PACKAGE=$(echo $REF_NAME | grep -oE '(clients/js|contracts|integrations/(ethers-v6|hardhat|wagmi-v2|viem-v2))')" >> $GITHUB_OUTPUT
+          echo "NPM_TAG=$(echo $REF_NAME | grep -oP '(?<=\-)(rc|next|alpha|beta)' || echo 'latest')" >> $GITHUB_OUTPUT
+      - name: Set publishing config
+        run: pnpm config set '//registry.npmjs.org/:_authToken' "${NODE_AUTH_TOKEN}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish ${{ github.ref_name }} to NPM
+        run: pnpm publish --access public --no-git-checks --tag $NPM_TAG
+        env:
+          NPM_CONFIG_PROVENANCE: true
+          NPM_TAG: ${{ steps.extract-tag.outputs.NPM_TAG }}
+        working-directory: ${{ steps.extract-tag.outputs.NPM_PACKAGE }}
+  
+  publish-soldeer:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref_name, 'contracts/v') || startsWith(github.ref_name, 'integrations/foundry/v')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract version from tag
+        id: extract-tag-version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "VERSION=$(echo $REF_NAME | grep -oP '(?<=v)[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+      - name: Install soldeer
+        run: cargo install soldeer
+      - name: Login to Soldeer
+        env:
+          SOLDEER_EMAIL: ${{ secrets.SOLDEER_EMAIL }}
+          SOLDEER_PASSWORD: ${{ secrets.SOLDEER_PASSWORD }}
+        run: soldeer login --email "$SOLDEER_EMAIL" --password "$SOLDEER_PASSWORD"
+      - if: startsWith(github.ref_name, 'contracts/v')
+        run: |
+          echo "Publishing version: ${{ steps.extract-tag-version.outputs.VERSION }}"
+          soldeer push @oasisprotocol-sapphire-contracts~${{ steps.extract-tag-version.outputs.VERSION }}
+        working-directory: contracts/contracts
+      - if: startsWith(github.ref_name, 'integrations/foundry/v')
+        run: |
+          echo "Publishing version: ${{ steps.extract-tag-version.outputs.VERSION }}"
+          soldeer push @oasisprotocol-sapphire-foundry~${{ steps.extract-tag-version.outputs.VERSION }}
+        working-directory: integrations/foundry/lib/oasisprotocol-sapphire-foundry
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref_name, 'clients/py/v')
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Extract version from tag
+        id: extract-tag-version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "SAPPHIREPY_VERSION=$(echo $REF_NAME | grep -oP '(?<=v)[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
+      
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+          pip install -r requirements.txt
+          pip install -r requirements.dev.txt
+        working-directory: clients/py
+      
+      - name: Update version in setup.py
+        run: |
+          sed -i "s/version=\"[0-9]\+\.[0-9]\+\.[0-9]\+\"/version=\"${{ steps.extract-tag-version.outputs.SAPPHIREPY_VERSION }}\"/" setup.py
+        working-directory: clients/py
+      
+      - name: Build package
+        run: |
+          make build
+        working-directory: clients/py
+      
+      - name: Publish to PyPI
+        env:
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          twine upload --username __token__ dist/* --verbose # __token__ username specifies the usage of the API token
+        working-directory: clients/py
